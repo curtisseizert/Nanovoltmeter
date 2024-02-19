@@ -13,6 +13,13 @@ This repository will also include the source code for the STM32U575 microcontrol
 <img width="1339" alt="Main board render (top)" src="https://github.com/curtisseizert/Nanovoltmeter/assets/22351001/bd294c93-2309-4054-af25-7efb0ccb30b2">
 <img width="1295" alt="Main board render (bottom)" src="https://github.com/curtisseizert/Nanovoltmeter/assets/22351001/6c3817a4-bf96-47ec-aa63-08649612dcaf">
 
+Curent Status
+-------------
+
+I have received all the bare boards and have populated two each of the main board and the SMPS daughter board. The SMPS had a couple small issues that I should have caught in the schematic, but I got it working with some bodges. I have made the appropriate revisions in the schematic and am finishing updating the layout before uploading the revision. The ADR1399 symbol I made for the main board had the polarity of the heater pins swapped, which was easy enough to work around by bending the pins and putting a PTFE insulator over one where they crossed. I have begun a new revision of the main board for fixing the issues I find as I go along. I have populated a different board with just the input protection components, and this works well for slow rise times (>1 us) up to 60V at the inputs, clamping overvoltages of either polarity to about +/-2.2~2.4V. Fast rising signals ring at the input to the chopper switch, but fixing this should be a matter of selecting appropriate ferrite beads. I hope to finish some minimal code to get the board running by the end of February.
+
+Design Background
+-----------------
 
 A proof of concept model of the input stage was previously prepared, which showed a flat NSD of approximately 1.2 nV/sqrt(Hz). At 1 sample per second, the peak to peak noise was about 15 nV. The temperature coefficient of the meter was approximately 1 nV/K, but sensitivity to temperature fluctuations was evident and the change in power dissipation as the battery discharged led to a drift of ca. 1 nV/h. This prototype also had a bias current of ~3 nA due to charge injection from the input modulator switch. This revision seeks to change those issues as follows:
 
