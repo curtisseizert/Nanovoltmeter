@@ -1,9 +1,0 @@
-build-idx:
-  generated-by: csolution version 2.2.1
-  csolution: NVM_RevB.csolution.yml
-  cprojects:
-    - cproject: NVM_RevB.cproject.yml
-  cbuilds:
-    - cbuild: NVM_RevB+Target_1.cbuild.yml
-      project: NVM_RevB
-      configuration: +Target_1
