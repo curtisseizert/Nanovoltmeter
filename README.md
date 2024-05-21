@@ -16,6 +16,7 @@ This repository will also include the source code for the STM32U575 microcontrol
 
 Curent Status
 -------------
+Version 2.0 of the FW improves handling of results and user inputs, as well as reduces the load on the CPU by making better use of DMA. Unit testing is ongoing and some features are not yet implemented, but they will be coming soon. The command structure uses a SCPI-like syntax but is not fully SCPI-compliant. The improved FW should facilitate more performance testing.
 
 I have built two of these boards, one with an LTC6655 reference, the other with an ADR1399. I have tested the noise and offset performance of the latter both with internal shorts and an external 1 mV reference. Getting both boards to work has required some changes, and I have made the appropriate edits to a revision C schematic though I have not laid this out. The noise and temperature sensitivity of the LTC6655 board is superior for internal shorts, but it seems to have some issue that degrades its linearity, though I don't attribute this to the reference. The design, while complex, appears to meet the goals of low noise, low bias current, negligible offset, and low power consumption. 
 
