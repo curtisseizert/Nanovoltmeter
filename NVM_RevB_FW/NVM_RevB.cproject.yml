@@ -1,0 +1,100 @@
+project:
+  packs:
+    - pack: Keil::STM32U5xx_DFP@2.2.0
+    - pack: ARM::CMSIS@5.9.0
+    - pack: ARM::CMSIS-DSP@1.15.0
+    - pack: ARM::CMSIS-NN@4.1.0
+  setups:
+    - setup: Options for Target_1
+      processor:
+        trustzone: off
+      add-path:
+        - include
+      debug: "on"
+      misc:
+        - C:
+            - -std=gnu11
+          C-CPP:
+            - -O2
+            - -fno-rtti
+            - -funsigned-char
+            - -fshort-enums
+            - -fshort-wchar
+            - -ffunction-sections
+            - -Wall
+            - -Wpedantic
+            - -Werror
+            - -Wno-packed
+            - -Wno-reserved-id-macro
+            - -Wno-unused-macros
+            - -Wno-documentation-unknown-command
+            - -Wno-documentation
+            - -Wno-license-management
+            - -Wno-parentheses-equality
+          CPP:
+            - -xc++
+            - -std=gnu++14
+          ASM:
+            - -masm=auto
+          Link:
+            - --map
+            - --load_addr_map_info
+            - --xref
+            - --callgraph
+            - --symbols
+            - --info sizes
+            - --info totals
+            - --info unused
+            - --info veneers
+            - --strict
+            - --summary_stderr
+            - --info summarysizes
+  groups:
+    - group: src
+      files:
+        - file: src/ad403x.c
+        - file: src/ad5686.c
+        - file: src/adc.c
+        - file: src/gpio.c
+        - file: src/main.c
+        - file: src/spi.c
+        - file: src/sys_cfg.c
+        - file: src/tim.c
+        - file: src/uart.c
+        - file: src/nvmb.c
+        - file: src/acq.c
+        - file: src/dma.c
+        - file: src/serial_io.c
+        - file: src/fifo.c
+        - file: src/dac.c
+        - file: src/i2c.c
+        - file: src/tmp117.c
+        - file: src\sinc.c
+        - file: src\cmd_handler.c
+        - file: src\lexer.c
+    - group: include
+      files:
+        - file: include/ad403x.h
+        - file: include/ad5686.h
+        - file: include/adc.h
+        - file: include/gpio.h
+        - file: include/main.h
+        - file: include/spi.h
+        - file: include/sys_cfg.h
+        - file: include/tim.h
+        - file: include/uart.h
+        - file: include/nvmb.h
+        - file: include/acq.h
+        - file: include/dma.h
+        - file: include/serial_io.h
+        - file: include/fifo.h
+        - file: include/i2c.h
+        - file: include/tmp117.h
+        - file: include/dac.h
+        - file: include\sinc.h
+        - file: include\acq_private.h
+        - file: include\lexer.h
+        - file: include\cmd_handler.h
+  components:
+    - component: ARM::CMSIS:CORE
+    - component: Keil::Device:Startup&Source ASM
