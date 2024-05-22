@@ -53,6 +53,19 @@
 
 uint32_t dac_data[2];
 
+DmaNode_t dma_ch12_node =
+{
+	.CTR1 = DMA_CTR1_DINC | DMA_CTR1_SINC		// Increment source & dest addr
+			| (2U << DMA_CTR1_DDW_LOG2_Pos)		// 32-bit source word
+			| (2U << DMA_CTR1_SDW_LOG2_Pos) 	// 32-bit dest word
+			| (7U << DMA_CTR1_DBL_1_Pos)		// 7 word burst at dest
+			| (7U << DMA_CTR1_SBL_1_Pos)		// 7 word burst at src
+			| DMA_CTR1_DAP | DMA_CTR1_SAP,		// Port 1 allocated for source and dest
+	.CTR2 = DMA_CTR2_SWREQ,						// Software request
+	.CBR1 = 32,									// 32-byte default block size
+	.CLLR = DMA_CLLR_UT1 | DMA_CLLR_UT2 | DMA_CLLR_UB1 | DMA_CLLR_USA | DMA_CLLR_UDA | DMA_CLLR_ULL
+};
+
 DmaNode_t dma_ch1_lli[2] = 
 {
 	{
@@ -157,19 +170,21 @@ void dma_copy_node_to_reg(DMA_Channel_TypeDef * dma, DmaNode_t * node)
 	dma->CLLR = node->CLLR;
 }
 
-
-void DMA_CH0_Init(void)
+void DMA_CH12_Init(uint32_t * CSAR, uint32_t * CDAR)
 {
-	GPDMA1_Channel0->CTR1 |= DMA_CTR1_DINC		// Increment source addr
-						| (2U << DMA_CTR1_DDW_LOG2_Pos)
-						| (2U << DMA_CTR1_SDW_LOG2_Pos) // 32-bit word
-						| (0U << DMA_CTR1_DBL_1_Pos)		// 1 word burst at dest
-						| (0U << DMA_CTR1_SBL_1_Pos);		// 1 word burst at src
-	
-	GPDMA1_Channel0->CTR2 |= (6U << DMA_CTR2_REQSEL_Pos);	 // SPI1 RX Request
+	GPDMA1_Channel12->CCR |= (3U << DMA_CCR_PRIO_Pos)	// High priority
+						| DMA_CCR_LAP					// Port 1 Allocated for LLI update
+						| DMA_CCR_LSM					// Execute block once per SW Request
+						| DMA_CCR_TCIE;					// Transfer complete interrupt enable
+	dma_ch12_node.CSAR = (uint32_t *) CSAR;
+	dma_ch12_node.CDAR = (uint32_t *) CDAR;
+	dma_setup_circ_transfer(GPDMA1_Channel12, &dma_ch12_node);
+}
 
-	GPDMA1_Channel0->CCR |= DMA_CCR_HTIE | DMA_CCR_TCIE 
-						|	(3U << DMA_CCR_PRIO_Pos); 		// high priority
+void DMA_CH12_set_tx_bytes(uint16_t txsize)
+{
+	dma_ch12_node.CBR1 = txsize;
+	dma_copy_node_to_reg(GPDMA1_Channel12, &dma_ch12_node);
 }
 
 void DMA_CH1_Init(uint32_t * CSAR)

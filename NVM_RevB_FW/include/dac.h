@@ -9,6 +9,7 @@
 #define DAC1_DEFAULT_OUTPUT		0xA00
 
 void DACInit(void);
+void dac_write_code(uint16_t code);
 
 
 #endif // DAC_H_

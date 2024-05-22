@@ -16,7 +16,6 @@ static void init_mod_timers(AcqParam_t * acq);
 
 static void timer_config(AcqParam_t * acq);
 static void ad403x_set_acquisition_param(AcqParam_t * acq);
-static void ad403x_data_update_phase(AD403XData_t * data);
 static void set_code_deadband(AcqParam_t * acq);
 
 static int16_t convert_cds_phase_to_multiplier(CDSPhase_t phase);

@@ -24,6 +24,7 @@ typedef struct
 	uint32_t CTR1, CTR2, CBR1, CSAR, CDAR, CTR3, CBR2, CLLR;
 }Dma2DNode_t;
 
+extern DmaNode_t dma_ch12_node;
 extern DmaNode_t dma_ch1_lli[2];
 extern DmaNode_t dma_ch2_node;
 extern DmaNode_t dma_ch4_node;
@@ -41,10 +42,12 @@ void dma_copy_node_to_reg(DMA_Channel_TypeDef * dma, DmaNode_t * node);
 void dma_enable_channel(DMA_Channel_TypeDef * dma);
 void dma_set_data_bytes(DMA_Channel_TypeDef * dma, uint16_t len);
 
-void DMA_CH0_Init(void);
+
 void DMA_CH1_Init(uint32_t * CSAR);
 void DMA_CH2_Init(void);
 void DMA_CH4_Init(uint32_t * CDAR);
+void DMA_CH12_Init(uint32_t * CSAR, uint32_t * CDAR);
+void DMA_CH12_set_tx_bytes(uint16_t txsize);
 
 
 extern uint16_t blocks_per_cycle;

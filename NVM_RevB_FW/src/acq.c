@@ -8,16 +8,34 @@
 #include "spi.h"
 
 
+static volatile uint32_t dac_input;
+
+
 /// @brief Performs the timer and AD403X setup steps to prepare for acquisition
 /// @param acq AcqParam_t container for the acquisition parameters and data
 void setup_acquisition(AcqParam_t * acq)
 {
+	// Initialize timers
 	init_mod_timers(acq);
+
+	// Configure timer ARR and CCR registers with the acquisition parameters
 	timer_config(acq);
+
+	// Reset the ADC and configure it to match the acquisition parameters
 	ad403x_reset(acq->adc);
 	ad403x_set_acquisition_param(acq);
+
+	// Zero the index so the first block is valid
+	acq->adc_data->index = 0;
+
+	// Set the ADC data buffer size to match the number of blocks per cycle
 	acq->adc_data->bufsize = acq->blocks_per_cycle;
+
+	// Set the sinc filter order
 	sinc_set_order(acq->sinc, acq->sinc_order);
+
+	// Set the DMA transfer to the proper number of bytes for the current acquisition parameters
+	DMA_CH12_set_tx_bytes(acq->blocks_per_cycle * 4);
 }
 
 /// @brief Checks if the CDS controller (GPIO/TIMER) state matches the setting
@@ -42,12 +60,19 @@ static int16_t mod_state_setting_mismatch(AcqParam_t * acq)
 /// @param acq AcqParam_t container for the acquisition parameters and data
 void start_acquisition(AcqParam_t * acq)
 {
+	// Reset the block timer
+	reset_timer(TIM15);
+
+	// If the CDS and/or MOD settings are to enable timers, enable the relevant timer outputs
 	if(cds_state_setting_mismatch(acq)) tim_cds_clocks(acq);
 	if(mod_state_setting_mismatch(acq)) tim_mod_clocks(acq);
 
+	// Enable the MOD/CDS timers (regardless of whether their outputs are controlled by the timers
+	// themselves or GPIO) and enable the block timer
 	enable_timer(TIM2);
 	enable_timer(TIM15);
 	
+	// Set the modulator on flag
 	acq->flags |= ACQ_FLAG_MOD_ON;
 }
 
@@ -55,22 +80,21 @@ void start_acquisition(AcqParam_t * acq)
 /// @param acq AcqParam_t container for the acquisition parameters and data
 void pause_acquisition(AcqParam_t * acq)
 {
-	/* Disable timers, 
-	*	 enable gpio modulator and cds
-	*	 reset AD403X,
-	*  reconfigure AD403X with current parameters*/
-	
+		// Disaable modulator timers	
 	disable_mod_timers();
 	TIM8->CCER &= ~TIM_CCER_CC1NE;	// Disable TIM8 output (it is enabled in TIM3IRQ_Handler)
-	acq->index = 0;
+
+		// Zero offset counter and accumulator
 	acq->offset_accum = 0;
 	acq->offset_counter = 0;
-	
+
+		// Give MOD and CDS control to GPIO and set states
 	gpio_mod_clocks(acq);
 	gpio_cds_clocks(acq);
 	set_mod_phase(acq, MOD_PHASE_1);
 	set_cds_phase(acq, SW1_CM_SW2_CM);
-	
+
+		// Reset ADC and set its acquisition parameters
 	ad403x_reset(acq->adc);
 	ad403x_set_acquisition_param(acq);
 
@@ -81,14 +105,11 @@ void pause_acquisition(AcqParam_t * acq)
 /// @param acq AcqParam_t container for the acquisition parameters and data
 void pause_acquisition_diagnostic(AcqParam_t * acq)
 {
-	/* Disable timers, 
-	*	 enable gpio modulator and cds
-	*	 reset AD403X,
-	*  reconfigure AD403X with current parameters*/
-	
+		// Disable timers
 	disable_mod_timers();
 	TIM8->CCER &= ~TIM_CCER_CC1NE;	// Disable TIM8 output (it is enabled in TIM3IRQ_Handler)
 	
+		// Give MOD and CDS control to GPIO and set states
 	gpio_mod_clocks(acq);
 	gpio_cds_clocks(acq);
 	set_mod_phase(acq, MOD_PHASE_0);
@@ -301,8 +322,7 @@ void set_mod_phase(AcqParam_t * acq, ModPhase_t phase)
 		gpio_set_state(TIM3_CH3, (PinState_t) phase == MOD_PHASE_1);
 
 		acq->flags &= ~ACQ_FLAG_GPIOMODPOL;
-		acq->flags |= ACQ_FLAG_GPIOMODPOL * (uint16_t) phase;
-		
+		acq->flags |= ACQ_FLAG_GPIOMODPOL * (uint16_t) phase;		
 	}
 }
 
@@ -318,7 +338,6 @@ void set_cds_phase(AcqParam_t * acq, CDSPhase_t phase)
 
 		gpio_set_state(TIM4_CH3, (PinState_t) sw1_phase);
 		gpio_set_state(TIM4_CH4, (PinState_t) sw2_phase);
-
 	}
 }
 
@@ -337,6 +356,16 @@ CDSPhase_t get_cds_phase(void)
 	if(gpio_get_state(TIM4_CH4) == GPIO_STATE_HI) phase |= (1U << SW2_Pos);
 
 	return (CDSPhase_t) phase;
+}
+
+CDSPhase_t gen_cds_phase(uint16_t p1, uint16_t p2)
+{
+	CDSPhase_t cds_phase = SW1_CM_SW2_CM;
+	if(p1 > 1 || p2 > 1) return cds_phase;
+	cds_phase |= (CDSPhase_t) p1 << SW1_Pos;
+	cds_phase |= (CDSPhase_t) p2 << SW2_Pos;
+
+	return cds_phase;
 }
 
 /// @brief Converts a CDSPhase_t with switch states to a 
@@ -446,16 +475,16 @@ BlockErr_t check_overrange(const AD403XData_t * data)
 /// @brief Averages the elements in an array of data 
 /// @param data - AD403XData_t of the ADC data 
 /// @return int32_t of the average value of the elements of the array 
-int32_t get_code_average(const AD403XData_t * data)
+int64_t get_code_average(const AD403XData_t * data)
 {
-	int64_t avg = data->buf[0];
-	for(uint32_t i = 1; i < data->bufsize; i++){
+	int64_t avg = 0;
+	for(uint32_t i = 0; i < data->bufsize; ++i){
 		avg += data->buf[i];
 	}
 	
 	avg /= data->bufsize;
 	avg *= (int64_t) data->phase[0];
-	return (int32_t) avg;
+	return avg;
 }
 
 /// @brief Calculates the offset in a modulator cycle
@@ -465,7 +494,7 @@ int32_t get_code_offset(const AD403XData_t * data)
 {
 	int32_t offset = 0;
 	
-	for(uint32_t i = 0; i < data->bufsize/2; i++){
+	for(uint32_t i = 0; i < data->bufsize/2; ++i){
 		offset += data->buf[i] - data->buf[i + data->bufsize/2];
 	}
 	
@@ -480,7 +509,7 @@ int32_t get_code_offset(const AD403XData_t * data)
 /// @note the next block is taken from GPIO states, and the values are shifted over.
 /// @note As such, for the phase data to be accurate, this function must be called
 /// @note for each cycle or the phase data may become stale.
-static void ad403x_data_update_phase(AD403XData_t * data)
+void ad403x_data_update_phase(AD403XData_t * data)
 {
 	data->phase[0] = data->phase[1];
 	data->phase[1] = (int8_t) get_cds_phase_multiplier();
@@ -492,7 +521,9 @@ static void ad403x_data_update_phase(AD403XData_t * data)
 /// @return Double precision floating point representation of input voltage 
 double adc_code_to_volts(AcqParam_t * acq, int64_t code)
 {
-	return (double) code / (AD403X_CODE_SPAN * get_analog_gain(acq));
+	double v = (double) code;
+	v *= 2 * acq->acq_const->v_ref;
+	return (double) v / (AD403X_CODE_SPAN * get_analog_gain(acq));
 }
 
 /// @brief Processes data from one full modulator cycle to extract average and offset information
@@ -503,13 +534,16 @@ void process_data_cycle(AcqParam_t * acq)
 {
 	if(check_overrange(acq->adc_data)) acq->flags |= ADC_OVERRANGE_FLAG;
 	
+		// Divide code by 4 to get rid of OR and SYNC LSBS
 	int64_t avg_val = get_code_average(acq->adc_data)/4;
+	//acq->accum += avg_val;
 	sinc_update_integrators(acq->sinc, avg_val);
-
+	
+		// Divide code by 4 to get rid of OR and SYNC LSBS
 	acq->offset_accum += get_code_offset(acq->adc_data)/4;
 	acq->offset_counter++;
 
-	ad403x_data_update_phase(acq->adc_data);
+
 }
 
 /// @brief Calculates code increment to apply to the V_os DAC to null the input offset voltage
@@ -535,6 +569,12 @@ int16_t calculate_vos_dac_increment(AcqParam_t * acq)
 	return vos_dac_increment;
 }
 
+static double apply_scaling_factor(AcqParam_t * acq, double raw)
+{
+	raw *= 2 * acq->acq_const->v_ref;
+	return raw / (AD403X_CODE_SPAN * get_analog_gain(acq));
+}
+
 /// @brief Convenience function that outputs scaled voltage averaged over an averaging cycle
 /// @param acq AcqParam_t container of acquisition parameters and data
 /// @return Scaled voltage
@@ -542,11 +582,10 @@ int16_t calculate_vos_dac_increment(AcqParam_t * acq)
 /// @note the function modifies the state of the SincFilter_t * acq->sinc.
 double get_block_v_avg(AcqParam_t * acq)
 {
-	int64_t code_filtered = sinc_update_combs(acq->sinc);
-	sinc_reset_filter(acq->sinc);
-	
-	return adc_code_to_volts(acq, code_filtered);
+	return apply_scaling_factor(acq, sinc_update_combs_ret_fp(acq->sinc));
 }
+
+
 
 		/************************************************
 		 * 												*
@@ -557,9 +596,10 @@ double get_block_v_avg(AcqParam_t * acq)
 
 /// @brief Queues a data write to the AD5686
 /// @param code - data to write to the AD5686
-void queue_dac_write(uint32_t * code)
+void queue_dac_write(AD5686Channel_t ch, uint16_t code)
 {
-	dma_ch1_lli[1].CSAR = (uint32_t *) code;
+	dac_input = ad5686_format_data_write(ch, code);
+	dma_ch1_lli[1].CSAR = (uint32_t *) &dac_input;
 	dma_set_next_node(GPDMA1_Channel1, &dma_ch1_lli[1]);
 }
 
@@ -569,7 +609,7 @@ void set_relay_defaults(void)
 {
 	gpio_set_pin(K1_R);
 	gpio_set_pin(K2_S);
-	gpio_set_pin(K3_R);
+	gpio_set_pin(K3_S);
 	
 	TIM7->CR1 |= TIM_CR1_CEN; // Enable TIM7 for 5 ms delay
 }

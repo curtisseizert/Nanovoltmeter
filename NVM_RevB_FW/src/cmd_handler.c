@@ -2,12 +2,24 @@
     /* cmd_handler.c */
     /* Source file defining the command parser and handler functions for NVM Rev B */
 
-#include "cmd_handler.h"
+#include "cmd_handler_private.h"
+#include "nvmb.h"
 #include "acq.h"
 #include "serial_io.h"
+#include "dac.h"
 #include <math.h>
 
 static const char idnq_string[] = "Nanovoltmeter Rev B, FW v2.0";
+
+/// @brief Returns whether a command is a query or not
+/// @param cmd 
+/// @return 1 if the command is a query
+/// @return 0 if the command is not a query 
+static int16_t is_query(const Cmd_t * cmd)
+{
+    if(cmd->flags & (1U << CMD_FLAG_QUERY_Pos)) return 1;
+    return 0;
+}
 
 /// @brief Handles user input commands
 /// @param cs CmdString_t * container for fixed length char arrays copied from the Uart_Rx_t circular buffer
@@ -19,7 +31,7 @@ CmdErr command_handler(CmdString_t * cs)
     if(cmd.flags & (1U << CMD_FLAG_STAR_PREFIX))
     {
         switch(cmd.cmd[0].num)
-        {
+        { 
             case CMD_STAR_ESE:
                 STAR_ESE_handler(&cmd);
                 break;
@@ -31,6 +43,9 @@ CmdErr command_handler(CmdString_t * cs)
                 break;
             case CMD_STAR_RST:
                 STAR_RST_handler(&cmd);
+                break;
+            default:
+                cmd.err = CMD_ERROR_BAD_SYNTAX;
                 break;
         }
     }
@@ -47,6 +62,9 @@ CmdErr command_handler(CmdString_t * cs)
             case CMD_TOP_MEAS:
                 TOP_MEAS_handler(&cmd);
                 break;
+            case CMD_INP:
+                TOP_INP_handler(&cmd);
+                break;
             case CMD_TOP_FORM:
                 TOP_FORM_handler(&cmd);
                 break;
@@ -56,9 +74,29 @@ CmdErr command_handler(CmdString_t * cs)
             case CMD_TOP_TRIG:
                 TOP_TRIG_handler(&cmd);
                 break;
+            default:
+                cmd.err = CMD_ERROR_BAD_SYNTAX;
+                break;
         }
     }
 
+    switch(cmd.err)
+    {
+        case CMD_ERROR_BAD_SYNTAX:
+            serial_print("COMMAND ERROR: BAD SYNTAX\n\r");
+            break;
+        case CMD_ERROR_NOT_IMPLEMENTED:
+            serial_print("COMMAND ERROR: FEATURE NOT IMPLEMENTED\n\r");
+            break;
+        case CMD_ERROR_QUERY_ONLY:
+            serial_print("COMMAND ERROR: QUERY ONLY");
+            break;
+        case CMD_ERROR_CMD_ONLY:
+            serial_print("COMMAND ERROR: NO QUERY AVAILABLE");
+            break;
+        default:
+            break;
+    }
     return cmd.err;
 }
 
@@ -72,7 +110,7 @@ void TOP_SYST_handler(Cmd_t * cmd)
             cmd->err = CMD_ERROR_BAD_SYNTAX;
             break;
         case CMD_SYST_ERR:
-            if(!(cmd->flags & (1U << CMD_FLAG_QUERY_Pos))){
+            if(!is_query(cmd)){
                 cmd->err = CMD_ERROR_QUERY_ONLY;
                 break;
             }else{
@@ -80,7 +118,7 @@ void TOP_SYST_handler(Cmd_t * cmd)
                 break;
             }
         case CMD_SYST_VERS:
-            if(!(cmd->flags & (1U << CMD_FLAG_QUERY_Pos))){
+            if(!is_query(cmd)){
                 cmd->err = CMD_ERROR_QUERY_ONLY;
                 break;
             }else{
@@ -97,6 +135,8 @@ void TOP_SYST_handler(Cmd_t * cmd)
             }
     }
 }
+
+
 
 /// @brief Handler for *ESE and *ESE?
 /// @param cmd 
@@ -125,8 +165,8 @@ void STAR_IDN_handler(Cmd_t * cmd)
 /// @param cmd 
 void STAR_RST_handler(Cmd_t * cmd)
 {
-    serial_print("ERROR: FEATURE NOT IMPLEMENTED\n\r");
-    cmd->err = CMD_ERROR_NOT_IMPLEMENTED;    
+    serial_print("SYSTEM RESET\n\r");
+		Reset_Handler();
 }
 
 /// @brief Handler for STATus:... commands
@@ -153,7 +193,7 @@ void TOP_MEAS_handler(Cmd_t * cmd)
             CMD_MEAS_INIT_handler(cmd);
 				
         __attribute__ ((fallthrough)); 
-				case CMD_MEAS_READ:
+		case CMD_MEAS_READ:
             CMD_MEAS_READ_handler(cmd);
 
     }
@@ -163,61 +203,144 @@ void TOP_MEAS_handler(Cmd_t * cmd)
 /// @param cmd 
 void CMD_MEAS_CONF_handler(Cmd_t * cmd)
 {
+    pause_acquisition(&acq1);
     switch(cmd->cmd[2].num)
     {
-        case CMD_MEAS_CONF_MODF:
-            acq2.mod_freq = (float) cmd->fp_param;
+        case CMD_MODF:
+            if(!is_query(cmd)) acq1.mod_freq = (float) cmd->fp_param;
             break;
-        case CMD_MEAS_CONF_AVG:
-            acq2.mod_cycles_per_avg = (uint16_t) *cmd->int_param;
+        case CMD_AVG:
+            acq1.mod_cycles_per_avg = (uint16_t) *cmd->int_param;
             break;
-        case CMD_MEAS_CONF_DFRE:
-            acq2.mod_cycles_per_update = (uint16_t) *cmd->int_param;
+        case CMD_DFRE:
+            acq1.mod_cycles_per_update = (uint16_t) *cmd->int_param;
             break;
-        case CMD_MEAS_CONF_CDSF:
-            acq2.mod_cycles_per_cds = (uint16_t) *cmd->int_param;
+        case CMD_CDSF:
+            acq1.mod_cycles_per_cds = (uint16_t) *cmd->int_param;
             break;
-        case CMD_MEAS_CONF_ADFS:
-            acq2.adc_samp_freq = (uint32_t) *cmd->int_param;
+        case CMD_ADFS:
+            acq1.adc_samp_freq = (uint32_t) *cmd->int_param;
             break;
-        case CMD_MEAS_CONF_LOGS:
-            acq2.log2SampAvg = (uint16_t) *cmd->int_param;
+        case CMD_LOGS:
+            acq1.log2SampAvg = (uint16_t) *cmd->int_param;
             break;
-        case CMD_MEAS_CONF_SETT:
-            acq2.settle_time_us = (float) cmd->fp_param;
+        case CMD_SETT:
+            acq1.settle_time_us = (float) cmd->fp_param;
             break;
-        case CMD_MEAS_CONF_DBAN:
-            acq2.Vos_dac_deadband_nV = (float) cmd->fp_param;
+        case CMD_DBAN:
+            acq1.Vos_dac_deadband_nV = (float) cmd->fp_param;
             break;
-        case CMD_MEAS_CONF_DTIM:
-            acq2.mod_deadtime_us = (float) cmd->fp_param;
+        case CMD_DTIM:
+            acq1.mod_deadtime_us = (float) cmd->fp_param;
             break;
-        case CMD_MEAS_CONF_DTID:
-            acq2.demod_deadtime_us = (float) cmd->fp_param;
+        case CMD_DTID:
+            acq1.demod_deadtime_us = (float) cmd->fp_param;
             break;
-        case CMD_MEAS_CONF_SINC:
-            acq2.sinc_order = (uint16_t) *cmd->int_param;
+        case CMD_SINC:
+            acq1.sinc_order = (uint16_t) *cmd->int_param;
             break;
-       // case CMD_MEAS_CONF_DACA:
-       //     queue_dac_write()
+        case CMD_DACA:
+           queue_dac_write(AD5686_DAC_A, (uint16_t) *cmd->int_param);
+           break;
+        case CMD_DACB:
+           queue_dac_write(AD5686_DAC_B, (uint16_t) *cmd->int_param);
+           break;
+        case CMD_DACC:
+           queue_dac_write(AD5686_DAC_C, (uint16_t) *cmd->int_param);
+           break;
+        case CMD_DACD:
+           queue_dac_write(AD5686_DAC_D, (uint16_t) *cmd->int_param);
+           break;
+        case CMD_DACE:
+           dac_write_code((uint16_t) *cmd->int_param);
+           break;           
+        case CMD_GAIN:
+            set_gain(&acq1, (GainState_t) *cmd->int_param);
+            break;
+        case CMD_MOD:
+            CMD_MEAS_CONF_MOD_handler(cmd);
+            break;
+        case CMD_CDS:
+            CMD_MEAS_CONF_CDS_handler(cmd);
+            break;
+
 
     }
+}
+
+void CMD_MEAS_CONF_MOD_handler(Cmd_t * cmd)
+{
+    if(cmd->cmd[3].num == CMD_ON) acq1.flags &= ~ACQ_FLAG_GPIOMOD_SET;
+    else if(cmd->cmd[3].num == CMD_OFF) 
+    {
+				acq1.flags |= ACQ_FLAG_GPIOMOD_SET;
+        gpio_mod_clocks(&acq1);
+        set_mod_phase(&acq1, (ModPhase_t) *cmd->int_param);
+    }
+    else cmd->err = CMD_ERROR_BAD_SYNTAX;
+}
+
+void CMD_MEAS_CONF_CDS_handler(Cmd_t * cmd)
+{
+    if(cmd->cmd[3].num == CMD_ON) acq1.flags &= ~ACQ_FLAG_GPIOCDS_SET;
+    else if(cmd->cmd[3].num == CMD_OFF) 
+    {
+				acq1.flags |= ACQ_FLAG_GPIOCDS_SET;
+        gpio_cds_clocks(&acq1);
+        set_cds_phase(&acq1, gen_cds_phase(cmd->int_param[0], cmd->int_param[1]));
+    }
+    else cmd->err = CMD_ERROR_BAD_SYNTAX;
 }
 
 /// @brief Handler for MEASure:READ:... commands
 /// @param cmd 
 void CMD_MEAS_READ_handler(Cmd_t * cmd)
 {
-    serial_print("ERROR: FEATURE NOT IMPLEMENTED");
-    cmd->err = CMD_ERROR_NOT_IMPLEMENTED;
+    start_acquisition(&acq1);
 }
 
 /// @brief Handler for MEASure:INITiate
 /// @param cmd 
 void CMD_MEAS_INIT_handler(Cmd_t * cmd)
 {
-    serial_print("ERROR: FEATURE NOT IMPLEMENTED");
-    cmd->err = CMD_ERROR_NOT_IMPLEMENTED;
+    setup_acquisition(&acq1);
+    start_acquisition(&acq1);
+}
+
+/// @brief Handler for INPut:... commands
+/// @param cmd 
+void TOP_INP_handler(Cmd_t * cmd)
+{
+    if(cmd->cmd[1].num == CMD_RELA)
+    {
+        Relay_t relay = Relay_K1;
+        switch(cmd->cmd[2].num)
+        {
+            case CMD_INP:
+                relay = Relay_K1;
+                break;
+            case CMD_CAP:
+                relay = Relay_K2;
+                break;
+            case CMD_RES:
+                relay = Relay_K3;
+                break;
+            default:
+                cmd->err = CMD_ERROR_BAD_SYNTAX;
+        }
+
+        switch(cmd->cmd[3].num)
+        {
+            case CMD_SET:
+                relay_set_state(&relay, RELAY_SET);
+                break;
+            case CMD_RESE:
+                relay_set_state(&relay, RELAY_RESET);
+                break;
+
+        }
+    }
+    else cmd->err = CMD_ERROR_BAD_SYNTAX;
 }
 
 /// @brief Handler for FORMat:... commands

@@ -25,11 +25,12 @@ volatile uint32_t task_flags;
 // Variable for garbage results
 volatile uint32_t garbage;
 
-// Container for raw ADC results
+// Containers for raw ADC results
 volatile AD403XData_t ad403x_data;
+volatile uint32_t adc_readings[AD403X_MAX_ARRAY_LEN];
 
 // Sinc filter container
-SincFilter_t sinc;
+SincFilter_t sinc = {.order = 2};
 
 // FIFO for storing/sending results
 static FIFO_t reading_fifo = { .data_reqd = FIFO_VAVG_MASK};
@@ -91,7 +92,7 @@ static const AcqParam_t AcqParam_default = {
 	.mod_cycles_per_avg = 1800,
 	.mod_cycles_per_update = 18,
 	.mod_cycles_per_cds = 18,
-	.adc_samp_freq = 1000000,
+	.adc_samp_freq = 500000,
 	.log2SampAvg = 6,
 	.settle_time_us = (float) 15.0,
 	.Vos_dac_deadband_nV = (float) 40.0,
@@ -153,7 +154,7 @@ int main(void)
 	//i2c_enable(tmp117[0].i2c);
 	DACInit();
 	
-			/* Enable USART3 */
+		// Initialize USART3 and related DMA channels
 	usart3_init();
 	DMA_CH2_Init();
 	dma_enable_channel(GPDMA1_Channel2);
@@ -168,20 +169,19 @@ int main(void)
 		/* Wait for 5V4 PG before configuration ADC and DAC */
 	while(gpio_get_state(PG_IN_Pin) == GPIO_STATE_LO); // 
 	
-		/* Calculate acquisition parameters, setup AD403X and timers */
+		// Calculate acquisition parameters, setup AD403X and timers, setup DMA_CH12 
+	DMA_CH12_Init((uint32_t *)adc_readings, (uint32_t *)ad403x_data.buf);
 	setup_acquisition(&acq1);
-	
-		/* Set defaults for AD5686 */
+		
+		// Setup AD5686 and associated peripherals
 	ad5686_write_all(&ad5686);
-	
-		/* Initialize TMP117 */
-	//tmp117_init(&tmp117[0]);
-
 	spi_dma_enable(ad5686.spi);
 	DMA_CH1_Init(&ad5686.channel_codes[1]);
 	dma_enable_channel(ad5686.dma);
 	spi_enable(ad5686.spi);
 
+		// Initialize TMP117
+	//tmp117_init(&tmp117[0]);
 
 	
 	// Enable modulator timers and interrupts from AD4032 BUSY pin 
@@ -190,8 +190,10 @@ int main(void)
 	garbage = SPI1->RXDR;
 	//start_lp_timer(LPTIM1);
 
+
 	while(1)
 	{
+		
 			// TASK PRIORITIZATION SYSTEM 
 			// Increments through possible tasks starting with highest priority.
 			// If it hits a set task flag, the task is performed and the iteration
@@ -199,29 +201,44 @@ int main(void)
 		for(uint16_t task_bit = 0; task_bit <= MAX_TASK_BIT; task_bit++)
 		{
 			uint32_t task_masked = (1UL << task_bit) & task_flags;
-
+			
 			switch(task_masked)
 			{
 				case TASK_FLAG_NO_TASK:
 					break;
+
+				case TASK_FLAG_PROCESS_BLOCK:
+						// Write the average reading to the FIFO
+					fifo_write_v_avg(&reading_fifo, get_block_v_avg(&acq1));
+
+						// Write the Vos reading to the FIFO
+					fifo_write_other(&reading_fifo, acq1.v_os, FIFO_VOS_MASK);
+
+						// Clear the process block flag
+					task_flags &= ~TASK_FLAG_PROCESS_BLOCK;
+
+						// Set the send data flag
+					task_flags |= TASK_FLAG_SEND_DATA;
+					break;
+
 				case TASK_FLAG_PROCESS_CYCLE:
-					process_data_cycle(&acq1);
+					process_data_cycle(&acq1); // Process data from the previous cycle
+
+						// Increment Vos DAC as appropriate
 					ad5686.channel_codes[1] += calculate_vos_dac_increment(&acq1);
 					ad5686.channel_codes[1] = 
 						ad5686_format_data_write(V_OS_DAC, (uint16_t) ad5686.channel_codes[1]);
 					dma_enable_channel(ad5686.dma);
+
+						// Clear process cycle flag
 					task_flags &= ~TASK_FLAG_PROCESS_CYCLE;
 					break;
-				case TASK_FLAG_PROCESS_BLOCK:
-					fifo_write_v_avg(&reading_fifo, get_block_v_avg(&acq1));
-					fifo_write_other(&reading_fifo, acq1.v_os, FIFO_VOS_MASK);
-					task_flags &= ~TASK_FLAG_PROCESS_BLOCK;
-					task_flags |= TASK_FLAG_SEND_DATA;
-					break;
+
 				case TASK_FLAG_PROCESS_INPUT:
 					parse_rx_buffer((UartRx_t *)&uart_rx);
 					task_flags &= ~TASK_FLAG_PROCESS_INPUT;
 					break;
+
 				case TASK_FLAG_SEND_DATA:
 					if(send_serial_result(&reading_fifo) == SERIAL_IO_NO_ERROR){
 						task_flags &= ~TASK_FLAG_SEND_DATA;
@@ -229,7 +246,7 @@ int main(void)
 					break;
 			}
 
-			if(task_masked != TASK_FLAG_NO_TASK) break;
+			if(task_masked != TASK_FLAG_NO_TASK) break; // If all flags have been cleared, reset the loop
 		}
 	}	
 }
@@ -239,29 +256,40 @@ int main(void)
 void nvicInit(void)
 {
 		// Set Interrupt Priority
-	NVIC_SetPriority(EXTI0_IRQn, 0);
-	NVIC_SetPriority(TIM3_IRQn, 2);
-	NVIC_SetPriority(USART3_IRQn, 3);
-	NVIC_SetPriority(TIM7_IRQn, 9);
+	NVIC_SetPriority(EXTI0_IRQn, 1);
+	NVIC_SetPriority(TIM15_IRQn, 2);
+	NVIC_SetPriority(TIM3_IRQn, 3);
+	NVIC_SetPriority(GPDMA1_Channel12_IRQn, 3);
+	NVIC_SetPriority(USART3_IRQn, 4);
+	NVIC_SetPriority(TIM7_IRQn, 6);
 	NVIC_SetPriority(LPTIM1_IRQn,7);
-	NVIC_SetPriority(TIM15_IRQn, 4);
 	
 		// Enable interrupts
 	NVIC_EnableIRQ(TIM7_IRQn);
 	NVIC_EnableIRQ(TIM3_IRQn);
+	NVIC_EnableIRQ(GPDMA1_Channel12_IRQn);
 	NVIC_EnableIRQ(USART3_IRQn);
 	NVIC_EnableIRQ(LPTIM1_IRQn);
 	NVIC_EnableIRQ(TIM15_IRQn);
+}
+
+void GPDMA1_Channel12_IRQHandler(void)
+{
+		// Clear transfer complete flag
+	GPDMA1_Channel12->CFCR |= DMA_CFCR_TCF;
+
+		// Set process cycle flag as the ADC readings are now in the appropriate buffer
+	task_flags |= TASK_FLAG_PROCESS_CYCLE;
 }
 
 /// @brief Records address and registers incoming received commands using character match interrupt
 /// @param None 
 void USART3_IRQHandler(void)
 {
-	USART3->ICR |= USART_ICR_CMCF;
+	USART3->ICR |= USART_ICR_CMCF;		// Clear character match flag
 	
-	uart_rx_increment_index((UartRx_t *)&uart_rx);
-	task_flags |= TASK_FLAG_PROCESS_INPUT;
+	uart_rx_increment_index((UartRx_t *)&uart_rx);	// Set appropriate pointer index for data container
+	task_flags |= TASK_FLAG_PROCESS_INPUT;	// Set process input flag
 }
 
 void LPTIM1_IRQHandler(void)
@@ -278,19 +306,19 @@ void LPTIM1_IRQHandler(void)
 /// @note Must be able to complete SPI transaction before next CNV pulse
 void EXTI0_IRQHandler(void)
 {
-	gpio_reset_pin(ADC_NCS_Pin); 	// Pull NCS low
-	SPI1->CR1 |= SPI_CR1_CSTART;
+	gpio_reset_pin(ADC_NCS_Pin); 		// Pull NCS low
+	SPI1->CR1 |= SPI_CR1_CSTART;		// Start SPI transfer
 
-	while(!(SPI1->SR & SPI_SR_EOT));
-	gpio_set_pin(ADC_NCS_Pin);		// Pull NCS high
+	while(!(SPI1->SR & SPI_SR_EOT));	// Wait for EOT flag to be set
+	gpio_set_pin(ADC_NCS_Pin);			// Pull NCS high
 	
-	ad403x_data.buf[ad403x_data.index] = (int32_t) SPI1->RXDR;
+	adc_readings[ad403x_data.index] = (int32_t) SPI1->RXDR; // Save reading to intermediate buffer
 	
-	SPI1->IFCR |= SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
+	SPI1->IFCR |= SPI_IFCR_EOTC | SPI_IFCR_TXTFC; // Clear SPI flags
 
-	ad403x_data.index++;
+	ad403x_data.index++;				// Increment index
 	
-	EXTI->FPR1 |= (1UL << 0);
+	EXTI->FPR1 |= (1UL << 0);			// Clear interrupt pending flag
 }
 
 /// @brief Synchronizes data processing and IO operations with modulator clock
@@ -298,20 +326,27 @@ void EXTI0_IRQHandler(void)
 void TIM3_IRQHandler(void)
 {
 	TIM3->SR &= ~TIM_SR_UIF; // Clear UIF
-			/* Reset sample counter */
-	ad403x_data.index = 0;
-	
-		/* It is necessary to enable TIM8 output here
-		*  to ensure it doesn't go high in idle state
-		*  and throw off block synchronization with 
-		*  ADC OSR */
 
-	TIM8->CCER |= TIM_CCER_CC1NE; // CH1N enable
-	
+		// Send DAC code to AD5686 every cycle regardless of whether it has been
+		// updated. This must be done at a consistent time per cycle to avoid spur
+		// generation.
 	SPI2->IFCR |= SPI_IFCR_EOTC | SPI_IFCR_TXTFC;
 	spi_start(ad5686.spi);
+	
+		// It is necessary to enable TIM8 output here
+		// to ensure it doesn't go high in idle state
+		// and throw off block synchronization with 
+		// ADC OSR
+	TIM8->CCER |= TIM_CCER_CC1NE; // CH1N enable
+	
+	ad403x_data.index = 0;
+	
+		// This function must be run in an ISR to ensure proper timing
+	ad403x_data_update_phase((AD403XData_t *) &ad403x_data);
 
-	task_flags |= TASK_FLAG_PROCESS_CYCLE;
+		// Enable DMA to copy readings out of intermediate buffer
+		// Note: completion of this transfer sets the process cycle flag
+	GPDMA1_Channel12->CCR |= DMA_CCR_EN; 
 }
 
 /// @brief Interrupt for overflow of TIM15->CNT signalling the completion of a block

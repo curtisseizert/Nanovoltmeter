@@ -10,6 +10,7 @@
 #include "sys_cfg.h"
 #include "stdint.h"
 #include "ad403x.h"
+#include "ad5686.h"
 #include "sinc.h"
 
 #define ACQ_FLAG_GPIO_CDS				(1UL << 0)
@@ -36,7 +37,7 @@
 #define NULL_ENABLE						1UL << 16
 #define ACQ_FLAG_SET_NULL				1UL << 17
 
-#define AD403X_MAX_ARRAY_LEN			512
+#define AD403X_MAX_ARRAY_LEN			256
 
 #define DATA_FLAG_DATA_INVALID			(1U << 0)
 #define DATA_FLAG_WAIT_FOR_CYCLE		(1U << 1)
@@ -70,6 +71,8 @@ typedef struct{
 	SincFilter_t * sinc;
 	AD403XData_t * adc_data;
 	const AD403X_t * adc;
+	
+	int64_t accum;
 
 	int32_t mod_deadtime_cyc;
 	int32_t demod_deadtime_cyc;
@@ -85,7 +88,6 @@ typedef struct{
 	float v_os;
 
 	uint16_t offset_counter;
-	uint16_t index; 
 	uint16_t code_deadband;			// 
 	uint16_t mod_cycles_per_avg;	// number of modulator cycles per average value
 	uint16_t mod_cycles_per_update; // number of modulator cycles per Vos DAC update
@@ -140,6 +142,7 @@ void tim_mod_clocks(AcqParam_t * acq);
 void tim_cds_clocks(AcqParam_t * acq);
 ModPhase_t get_mod_phase(void);
 CDSPhase_t get_cds_phase(void);
+CDSPhase_t gen_cds_phase(uint16_t p1, uint16_t p2);
 
 	// GAIN-RELATED FUNCTIONS
 void set_gain(AcqParam_t * acq, GainState_t gain);
@@ -157,10 +160,12 @@ void process_data_cycle(AcqParam_t * acq);
 int16_t calculate_vos_dac_increment(AcqParam_t * acq);
 double get_block_v_avg(AcqParam_t * acq);
 inline BlockErr_t check_block_sync(void);
-int32_t get_code_average(const AD403XData_t * data);
+int64_t get_code_average(const AD403XData_t * data);
 int32_t get_code_offset(const AD403XData_t * data);
+void ad403x_data_update_phase(AD403XData_t * data);
 
 	// MISCELLANEOUS FUNCTIONS
-void queue_dac_write(uint32_t * code);
+void queue_dac_write(AD5686Channel_t ch, uint16_t code);
+void set_relay_defaults(void);
 
 #endif // ACQ_H_

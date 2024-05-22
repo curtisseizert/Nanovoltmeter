@@ -12,3 +12,10 @@ void DACInit(void)
 	DAC1->SWTRIGR |= DAC_SWTRIGR_SWTRIG1;
 	
 }
+
+void dac_write_code(uint16_t code)
+{
+	code &= DAC_DHR12R1_DACC1DHR_Msk;
+	DAC1->DHR12R1 &= ~DAC_DHR12R1_DACC1DHR_Msk;
+	DAC1->DHR12R1 |= (code << DAC_DHR12R1_DACC1DHR_Pos);
+}

@@ -17,6 +17,7 @@ typedef struct{
 
 void sinc_update_integrators(SincFilter_t * sinc, int64_t input);
 int64_t sinc_update_combs(SincFilter_t * sinc);
+double sinc_update_combs_ret_fp(SincFilter_t * sinc);
 void sinc_reset_filter(SincFilter_t * sinc);
 void sinc_set_order(SincFilter_t * sinc, uint16_t order);
 

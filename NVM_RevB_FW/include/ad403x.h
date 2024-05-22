@@ -1,3 +1,4 @@
+	
 	/* DRIVER HEADER FOR AD403x in NVM */
 	
 #ifndef AD403X_H_
@@ -77,7 +78,6 @@
 #define AD403X_TWO_LANES						(1U << 6)
 #define AD403X_FOUR_LANES						(1U << 7)
 
-
 /* CLK MODE */
 #define AD403X_SPI_COMPATIBLE_MODE				0x00
 #define AD403X_ECHO_CLOCK_MODE					(1U << 4)
@@ -111,7 +111,7 @@
 
 /* NVM-SPECIFIC DEFINES */
 #define AD403X_DEFAULT_MODE						(AD403X_ONE_LANE | AD403X_30_AVERAGED_DIFF)
-extern uint16_t log2SampAvg;
+
 
 typedef struct{
 	SPI_TypeDef * spi;

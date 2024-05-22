@@ -65,6 +65,8 @@ void tim15_init(void)
 {
 	TIM15->PSC = 0;
 	
+	TIM15->CR1 = TIM_CR1_URS;
+	
 	TIM15->CR2 |= (1U << TIM_CR2_MMS_Pos); // EN used as external trigger (DMA CH0)
 	TIM15->DIER |= TIM_DIER_UIE;
 		

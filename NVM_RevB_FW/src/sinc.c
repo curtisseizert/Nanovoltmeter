@@ -56,8 +56,7 @@ double sinc_update_combs_ret_fp(SincFilter_t * sinc)
 		divisor *= sinc->counter;
 	}
 	sinc->counter = 0;
-	double output = (double) carry;
-	return output/divisor;
+	return carry/(double)divisor;
 }
 
 /// @brief Zeros the integrators, combs, and counter of a sinc filter
